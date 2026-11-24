@@ -77,7 +77,21 @@ python ruoyi_check.py -t targets.txt -c creds.txt --skip-captcha --report both
 | `--probe` | 只探测接口与验证码配置，不尝试登录 |
 | `--out` | 命中结果文本文件，默认 `ruoyi_hit.txt` |
 | `--json` | 命中结果 JSON 文件，默认 `ruoyi_hit.json` |
+| `--skip-captcha` | 目标开启验证码时直接跳过，不尝试登录（适合只想测无验证码站点） |
+| `--report` | 跑完自动生成报告，可选 `none`/`html`/`csv`/`both`，默认 `both` |
+| `--report-name` | 报告文件名前缀，默认 `ruoyi_report` |
 | `-v, --version` | 查看版本号 |
+
+## 报告说明
+
+运行结束后（包括 `Ctrl+C` 中断）会在当前目录生成报告：
+
+| 文件 | 内容 |
+| --- | --- |
+| `ruoyi_report.html` | 统计卡片 + 目标结果表（目标/验证码状态/尝试次数/命中凭据） + 命中列表，浏览器直接打开 |
+| `ruoyi_report.csv` | 同样的目标结果表，可用 Excel 打开筛选 |
+
+用 `--report none` 可关闭报告生成，用 `--report-name 自定义名` 改文件名前缀。
 
 ## 文件格式
 
@@ -141,7 +155,7 @@ RuoYi 默认连续 5 次密码错误会锁定账号 10 分钟。脚本检测到"
 
 ## 版本
 
-当前版本：v1.0.0
+当前版本：v1.1.0
 
 ## License
 
