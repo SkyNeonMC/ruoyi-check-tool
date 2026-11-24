@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行产物
+ruoyi_hit.txt
+ruoyi_hit.json
+*.log
+
+# 本地字典与目标列表，避免误传
+creds.txt
+users.txt
+passwords.txt
+targets.txt
