@@ -15,6 +15,7 @@
 
 import argparse
 import base64
+import csv
 import json
 import sys
 import time
@@ -22,7 +23,7 @@ from datetime import datetime
 
 import requests
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 DEFAULT_CREDS = [
     ("admin", "admin123"),
@@ -187,22 +188,46 @@ def save_hit(out_path, json_path, hit):
         json.dump(hits, f, ensure_ascii=False, indent=2)
 
 
-def run_target(target, creds, args, session, hits):
+def run_target(target, creds, args, session, hits, records):
+    record = {
+        "target": target,
+        "api": "",
+        "captcha": "",
+        "status": "",
+        "attempts": 0,
+        "hit": "",
+        "last_msg": "",
+    }
+    records.append(record)
+
     api, meta = detect_api(target, session, args.timeout)
     if not api:
+        record["status"] = "error"
+        record["last_msg"] = "未探测到 /captchaImage 接口"
         print(f"[ERROR] {target} 未探测到 /captchaImage 接口，跳过。")
         return "error"
 
+    record["api"] = api
     captcha_enabled = bool(meta.get("captchaEnabled"))
+    record["captcha"] = "开启" if captcha_enabled else "关闭"
     print(f"[INFO] 目标：{target}")
     print(f"[INFO] 接口前缀：{api}")
     print(f"[INFO] 验证码：{'开启' if captcha_enabled else '关闭'}")
 
+    if captcha_enabled and args.skip_captcha:
+        record["status"] = "skipped"
+        record["last_msg"] = "开启验证码，按 --skip-captcha 跳过"
+        print("[SKIP] 目标开启验证码，已跳过（加 --skip-captcha 时不尝试）。")
+        return "skipped"
+
     if captcha_enabled and load_ocr() is None and not args.manual:
+        record["status"] = "error"
+        record["last_msg"] = "ddddocr 不可用且未指定 --manual"
         print("[ERROR] 目标开启验证码，但 ddddocr 不可用。安装：pip install ddddocr，或加 --manual。")
         return "error"
 
     if args.probe:
+        record["status"] = "probe"
         return "probe"
 
     for idx, (user, pwd) in enumerate(creds, 1):
@@ -214,6 +239,8 @@ def run_target(target, creds, args, session, hits):
             print(f"[WARN] 验证码错误，重试第 {retry} 次")
             status, msg = attempt_login(api, user, pwd, session, args.timeout, captcha_enabled, args.manual)
 
+        record["attempts"] = idx
+        record["last_msg"] = msg
         print(f"[{idx}/{len(creds)}] {user}:{pwd} -> {status} | {msg}")
 
         if status == "success":
@@ -226,17 +253,120 @@ def run_target(target, creds, args, session, hits):
             }
             hits.append(hit)
             save_hit(args.out, args.json, hit)
+            record["status"] = "hit"
+            record["hit"] = f"{user} / {pwd}"
             print(f"[+] 命中，已保存到 {args.out} 和 {args.json}")
             return "hit"
         if status == "locked":
+            record["status"] = "locked"
             print("[!] 账号已锁定，停止该目标。")
             return "locked"
         if status == "error":
+            record["status"] = "error"
             return "error"
 
         time.sleep(args.delay)
 
+    record["status"] = "done"
     return "done"
+
+
+STATUS_CN = {
+    "hit": "命中",
+    "locked": "锁定",
+    "error": "异常",
+    "done": "完成无命中",
+    "probe": "仅探测",
+    "skipped": "跳过验证码",
+}
+
+
+def write_csv_report(records, path):
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["目标", "接口前缀", "验证码", "状态", "尝试次数", "命中凭据", "最后提示"])
+        for r in records:
+            writer.writerow(
+                [
+                    r["target"],
+                    r["api"],
+                    r["captcha"],
+                    STATUS_CN.get(r["status"], r["status"]),
+                    r["attempts"],
+                    r["hit"],
+                    r["last_msg"],
+                ]
+            )
+
+
+def write_html_report(records, stats, hits, path):
+    cards = "".join(
+        f'<div class="card"><div class="num">{stats.get(k, 0)}</div><div class="label">{label}</div></div>'
+        for k, label in [
+            ("hit", "命中"),
+            ("locked", "锁定"),
+            ("error", "异常"),
+            ("done", "完成无命中"),
+            ("skipped", "跳过验证码"),
+            ("probe", "仅探测"),
+        ]
+    )
+    rows = ""
+    for r in records:
+        cls = "hit" if r["status"] == "hit" else ("err" if r["status"] in ("error", "locked") else "")
+        rows += (
+            f'<tr class="{cls}"><td>{r["target"]}</td><td>{r["api"]}</td>'
+            f'<td>{r["captcha"]}</td><td>{STATUS_CN.get(r["status"], r["status"])}</td>'
+            f'<td>{r["attempts"]}</td><td>{r["hit"]}</td><td>{r["last_msg"]}</td></tr>'
+        )
+    hit_rows = "".join(
+        f'<tr><td>{h["target"]}</td><td>{h["username"]}</td><td>{h["password"]}</td><td>{h["time"]}</td></tr>'
+        for h in hits
+    ) or '<tr><td colspan="4">无</td></tr>'
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>RuoYi 检测报告</title>
+<style>
+ body{{font-family:Segoe UI,Microsoft YaHei,sans-serif;margin:24px;color:#222}}
+ h2{{margin-top:32px}}
+ .cards{{display:flex;gap:12px;flex-wrap:wrap}}
+ .card{{min-width:110px;padding:14px 18px;border-radius:8px;background:#f5f7fa;border:1px solid #e4e7ed}}
+ .card .num{{font-size:26px;font-weight:700}}
+ .card .label{{color:#666;font-size:13px;margin-top:4px}}
+ table{{border-collapse:collapse;width:100%;margin-top:12px;font-size:14px}}
+ th,td{{border:1px solid #e4e7ed;padding:8px 10px;text-align:left}}
+ th{{background:#f5f7fa}}
+ tr.hit td{{background:#f0f9eb}}
+ tr.err td{{background:#fef0f0}}
+ .muted{{color:#999;font-size:13px}}
+</style></head><body>
+<h1>RuoYi 弱口令检测报告</h1>
+<div class="muted">生成时间：{now} ｜ 目标总数：{len(records)}</div>
+<div class="cards">{cards}</div>
+<h2>目标结果</h2>
+<table><thead><tr><th>目标</th><th>接口前缀</th><th>验证码</th><th>状态</th><th>尝试次数</th><th>命中凭据</th><th>最后提示</th></tr></thead>
+<tbody>{rows}</tbody></table>
+<h2>命中列表</h2>
+<table><thead><tr><th>目标</th><th>用户名</th><th>密码</th><th>时间</th></tr></thead><tbody>{hit_rows}</tbody></table>
+</body></html>"""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+def generate_reports(args, records, stats, hits):
+    if args.report == "none":
+        return
+    name = args.report_name
+    written = []
+    if args.report in ("html", "both"):
+        write_html_report(records, stats, hits, name + ".html")
+        written.append(name + ".html")
+    if args.report in ("csv", "both"):
+        write_csv_report(records, name + ".csv")
+        written.append(name + ".csv")
+    if written:
+        print(f"[INFO] 报告已生成：{'、'.join(written)}")
 
 
 def main():
@@ -255,6 +385,11 @@ def main():
     parser.add_argument("--probe", action="store_true", help="只探测接口和验证码配置，不尝试登录")
     parser.add_argument("--out", default="ruoyi_hit.txt", help="命中结果文本文件，默认 ruoyi_hit.txt")
     parser.add_argument("--json", default="ruoyi_hit.json", help="命中结果 JSON 文件，默认 ruoyi_hit.json")
+    parser.add_argument("--skip-captcha", action="store_true", help="目标开启验证码时直接跳过，不尝试登录")
+    parser.add_argument(
+        "--report", choices=["none", "html", "csv", "both"], default="both", help="跑完自动生成报告，默认 both"
+    )
+    parser.add_argument("--report-name", default="ruoyi_report", help="报告文件名前缀，默认 ruoyi_report")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
 
@@ -269,21 +404,25 @@ def main():
 
     print(f"[INFO] 目标数：{len(targets)}，凭据：{desc}（共 {len(creds)} 组），间隔 {args.delay}s\n")
 
-    hits, stats = [], {"hit": 0, "locked": 0, "error": 0, "done": 0, "probe": 0}
+    hits = []
+    records = []
+    stats = {"hit": 0, "locked": 0, "error": 0, "done": 0, "probe": 0, "skipped": 0}
     try:
         for target in targets:
-            result = run_target(target, creds, args, session, hits)
+            result = run_target(target, creds, args, session, hits, records)
             stats[result] = stats.get(result, 0) + 1
             if result == "hit":
                 print(f"[+] {target} 命中，跳过该目标的剩余凭据。")
             print()
     except KeyboardInterrupt:
         print("\n[!] 已手动中断。")
+    finally:
+        generate_reports(args, records, stats, hits)
 
     print("===== 统计 =====")
     print(
         f"目标 {len(targets)} 个：命中 {stats['hit']}，锁定 {stats['locked']}，异常 {stats['error']}，"
-        f"完成 {stats['done']}，仅探测 {stats['probe']}"
+        f"完成 {stats['done']}，跳过验证码 {stats['skipped']}，仅探测 {stats['probe']}"
     )
     for hit in hits:
         print(f"  {hit['target']}  {hit['username']} / {hit['password']}")

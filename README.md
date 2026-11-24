@@ -14,10 +14,12 @@
 - **前缀自适应**：自动识别 `/prod-api`、`/dev-api` 或无前缀的部署方式
 - **验证码处理**：验证码关闭时直接登录；开启时优先使用 [ddddocr](https://github.com/sml2h3/ddddocr) 识别，识别错误自动换图重试，未安装时可手动输入
 - **防锁号保护**：返回信息包含"锁定"时立即停止该目标，避免继续累计失败次数
-- **批量目标**：支持从文件读取多个目标地址
+- **批量目标**：支持从文件读取多个目标地址，逐个检测
 - **多种凭据来源**：内置常见弱口令、`user:pass` 凭据文件、用户名字典 × 密码字典
+- **跳过验证码目标**：`--skip-captcha` 一键跳过开启验证码的目标，只测无验证码的站点
+- **自动生成报告**：跑完自动输出 HTML + CSV 报告，含统计卡片、目标结果表与命中列表
 - **结果留存**：命中结果同时写入文本和 JSON，便于后续整理
-- **中断友好**：`Ctrl+C` 中断后仍会输出统计汇总
+- **中断友好**：`Ctrl+C` 中断后仍会生成报告并输出统计汇总
 
 ## 环境要求
 
@@ -55,6 +57,9 @@ python ruoyi_check.py -u http://127.0.0.1:8080 -U users.txt -P passwords.txt --d
 
 # 5. 批量目标
 python ruoyi_check.py -t targets.txt --delay 2
+
+# 6. 批量目标 + 自己的字典 + 跳过开验证码的站点 + 自动生成报告（HTML + CSV）
+python ruoyi_check.py -t targets.txt -c creds.txt --skip-captcha --report both
 ```
 
 ## 参数说明
